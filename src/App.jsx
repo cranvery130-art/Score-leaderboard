@@ -2473,11 +2473,17 @@ function WorkspaceGate({ lastCode, onFounderLogin, onCreateCode, onRequestAccess
     if (!clean || !founderPassword.trim()) return;
     setBusy(true);
     setError("");
-    const result = await onFounderLogin(clean, founderPassword);
-    setBusy(false);
-    if (!result.ok) {
-      if (result.reason === "bad-code") setError("존재하지 않는 코드입니다. 아래 '새 코드 만들기'로 새로 만들 수 있어요.");
-      else setError("개설자 전용 비밀번호가 올바르지 않습니다.");
+    try {
+      const result = await onFounderLogin(clean, founderPassword);
+      if (!result.ok) {
+        if (result.reason === "bad-code") setError("존재하지 않는 코드입니다. 아래 '새 코드 만들기'로 새로 만들 수 있어요.");
+        else setError("개설자 전용 비밀번호가 올바르지 않습니다.");
+      }
+    } catch (e) {
+      console.error("founder login failed:", e);
+      setError("연결에 실패했습니다 (" + (e && e.code ? e.code : "알 수 없는 오류") + "). Firebase 설정을 확인하고 다시 시도해 주세요.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -2486,11 +2492,17 @@ function WorkspaceGate({ lastCode, onFounderLogin, onCreateCode, onRequestAccess
     if (!clean || !founderPasswordNew.trim()) return;
     setBusy(true);
     setError("");
-    const result = await onCreateCode(clean, viewerPasswordNew, founderPasswordNew);
-    setBusy(false);
-    if (!result.ok) {
-      if (result.reason === "code-taken") setError("이미 사용 중인 코드예요. 개설자 전용 비밀번호가 다릅니다.");
-      else setError("코드를 만들지 못했습니다. 다시 시도해 주세요.");
+    try {
+      const result = await onCreateCode(clean, viewerPasswordNew, founderPasswordNew);
+      if (!result.ok) {
+        if (result.reason === "code-taken") setError("이미 사용 중인 코드예요. 개설자 전용 비밀번호가 다릅니다.");
+        else setError("코드를 만들지 못했습니다. 다시 시도해 주세요.");
+      }
+    } catch (e) {
+      console.error("create code failed:", e);
+      setError("연결에 실패했습니다 (" + (e && e.code ? e.code : "알 수 없는 오류") + "). Firebase 설정을 확인하고 다시 시도해 주세요.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -2498,13 +2510,19 @@ function WorkspaceGate({ lastCode, onFounderLogin, onCreateCode, onRequestAccess
     if (!name.trim() || !reqCode.trim() || !reqPassword.trim()) return;
     setBusy(true);
     setFormError("");
-    const result = await onRequestAccess({ name, code: reqCode, password: reqPassword, wantsEdit });
-    setBusy(false);
-    if (!result.ok) {
-      if (result.reason === "bad-code") setFormError("존재하지 않는 코드입니다.");
-      else if (result.reason === "no-password-set") setFormError("이 코드는 아직 조회 비밀번호가 설정되어 있지 않습니다. 개설자에게 문의해 주세요.");
-      else if (result.reason === "bad-password") setFormError("조회 비밀번호가 올바르지 않습니다.");
-      else setFormError("신청을 처리하지 못했습니다. 다시 시도해 주세요.");
+    try {
+      const result = await onRequestAccess({ name, code: reqCode, password: reqPassword, wantsEdit });
+      if (!result.ok) {
+        if (result.reason === "bad-code") setFormError("존재하지 않는 코드입니다.");
+        else if (result.reason === "no-password-set") setFormError("이 코드는 아직 조회 비밀번호가 설정되어 있지 않습니다. 개설자에게 문의해 주세요.");
+        else if (result.reason === "bad-password") setFormError("조회 비밀번호가 올바르지 않습니다.");
+        else setFormError("신청을 처리하지 못했습니다. 다시 시도해 주세요.");
+      }
+    } catch (e) {
+      console.error("access request failed:", e);
+      setFormError("연결에 실패했습니다 (" + (e && e.code ? e.code : "알 수 없는 오류") + "). Firebase 설정을 확인하고 다시 시도해 주세요.");
+    } finally {
+      setBusy(false);
     }
   }
 
