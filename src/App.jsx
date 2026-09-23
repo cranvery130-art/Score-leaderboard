@@ -53,6 +53,14 @@ const RESULT_LABELS = { win: "승", draw: "무", loss: "패", foul: "부정행�
 const RESULT_LABELS_WITH_CUSTOM = { ...RESULT_LABELS, custom: "직접 입력" };
 const DEFAULT_POINTS = { win: 2, draw: 1, loss: 0, foul: -1 };
 const RESULT_DOT_COLOR = { win: "#C9A227", draw: "#9AA5B1", loss: "#D9D3C2", foul: "#8C2138", custom: "#5B7FBD" };
+// 결과별 배지/드롭다운 색 — 참가자 체크 목록의 결과 선택 드롭다운과 등록된 경기 배지에서 함께 씁니다.
+const RESULT_COLORS = {
+  win: { bg: "#F3DA8E", text: "#5C4A0E" },
+  draw: { bg: "#DDE2E6", text: "#3F454B" },
+  loss: { bg: "#EFE8D8", text: "#5B584C" },
+  foul: { bg: "#F2D4DC", text: "#8C2138" },
+  custom: { bg: "#DCE4F5", text: "#324B7A" },
+};
 const EVENT_PRESETS = ["축구", "피구", "배드민턴", "농구", "발야구", "줄넘기", "티볼", "탁구"];
 const LAST_CODE_KEY = "last-code";
 const LAST_NAME_KEY = "last-name";
@@ -636,6 +644,10 @@ function Dashboard({ workspaceCode, onLeaveWorkspace, role, myName, deviceId, on
     setMatches((prev) => [...prev, { id: uid("match"), ...match }]);
   }
 
+  function updateMatch(id, patch) {
+    setMatches((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+  }
+
   function removeMatch(id) {
     openConfirm({
       title: "경기 기록 삭제",
@@ -803,6 +815,7 @@ function Dashboard({ workspaceCode, onLeaveWorkspace, role, myName, deviceId, on
             students={students}
             matches={matches}
             addMatch={addMatch}
+            updateMatch={updateMatch}
             removeMatch={removeMatch}
             pointsConfig={pointsConfig}
             setPointsConfig={setPointsConfig}
@@ -905,7 +918,8 @@ function Dashboard({ workspaceCode, onLeaveWorkspace, role, myName, deviceId, on
                   "'승점 기준 설정'에서 승/무/패/부정행위 점수를 직접 정할 수 있고, '종목별 기준'으로 바꾸면 종목마다 다른 점수도 줄 수 있어요(예: 축구는 승리 3점, 배드민턴은 2점). 종목별 기준은 표에서 종목을 직접 추가·삭제해요.",
                   "참가자별 결과 선택에는 '직접 입력'도 있어서, 정해진 승/무/패 점수 대신 그 학생·그 경기에만 적용할 점수를 바로 입력할 수 있어요.",
                   "'전체 승 / 전체 무 / 전체 패 / 전체 부정행위' 버튼으로, 지금 화면에 보이는(필터된) 학생 전체를 한 번에 체크하고 같은 결과로 일괄 지정할 수 있어요. '전체 해제'로 체크를 한 번에 풀 수도 있어요.",
-                  "등록한 경기는 언제든 목록에서 확인·삭제할 수 있어요.",
+                  "일부 학생만 골라 같은 결과를 주고 싶다면, 원하는 학생만 체크(전체선택·부분체크·해제 자유롭게 조합)한 뒤 '체크된 학생에게 결과 일괄 적용'에서 결과를 골라 적용하세요. 한 명씩 드롭다운을 열지 않아도 됩니다.",
+                  "등록한 경기는 목록의 연필 아이콘으로 언제든 내용을 고쳐 다시 저장하거나, 휴지통 아이콘으로 삭제할 수 있어요.",
                 ],
               },
               {
@@ -1604,6 +1618,7 @@ function MatchesTab({
   students,
   matches,
   addMatch,
+  updateMatch,
   removeMatch,
   pointsConfig,
   setPointsConfig,
@@ -1619,6 +1634,9 @@ function MatchesTab({
   const [checked, setChecked] = useState({});
   const [resultFor, setResultFor] = useState({});
   const [customPointsFor, setCustomPointsFor] = useState({});
+  const [bulkApplyResult, setBulkApplyResult] = useState("win");
+  const [bulkApplyCustomPoints, setBulkApplyCustomPoints] = useState("");
+  const [editingMatchId, setEditingMatchId] = useState(null);
   const [filterGrade, setFilterGrade] = useState("ALL");
   const [filterClass, setFilterClass] = useState("ALL");
   const [error, setError] = useState("");
@@ -1696,6 +1714,30 @@ function MatchesTab({
     setCustomPointsFor((prev) => ({ ...prev, [id]: value }));
   }
 
+  // 지금 체크된 학생들(전체 체크, 몇 명만 체크, 혹은 개별 체크 어떤 경우든)에게
+  // 한 번에 같은 결과를 적용해요. 한 명씩 드롭다운을 여는 수고를 덜어줍니다.
+  function applyBulkResultToChecked() {
+    const ids = Object.keys(checked).filter((id) => checked[id]);
+    if (ids.length === 0) return;
+    setResultFor((prev) => {
+      const next = { ...prev };
+      ids.forEach((id) => {
+        next[id] = bulkApplyResult;
+      });
+      return next;
+    });
+    if (bulkApplyResult === "custom") {
+      const val = Number(bulkApplyCustomPoints) || 0;
+      setCustomPointsFor((prev) => {
+        const next = { ...prev };
+        ids.forEach((id) => {
+          next[id] = val;
+        });
+        return next;
+      });
+    }
+  }
+
   function handleSubmit() {
     const finalEvent = event === "__custom__" ? customEvent.trim() : event;
     const participants = Object.keys(checked)
@@ -1720,7 +1762,41 @@ function MatchesTab({
       setError("참가한 학생을 한 명 이상 체크해 주세요.");
       return;
     }
-    addMatch({ date, event: finalEvent, participants });
+    if (editingMatchId) {
+      updateMatch(editingMatchId, { date, event: finalEvent, participants });
+    } else {
+      addMatch({ date, event: finalEvent, participants });
+    }
+    cancelEdit();
+  }
+
+  function startEdit(match) {
+    setEditingMatchId(match.id);
+    setDate(match.date);
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+    if (eventOptions.includes(match.event)) {
+      setEvent(match.event);
+      setCustomEvent("");
+    } else {
+      setEvent("__custom__");
+      setCustomEvent(match.event);
+    }
+    const nextChecked = {};
+    const nextResult = {};
+    const nextCustomPoints = {};
+    match.participants.forEach((p) => {
+      nextChecked[p.studentId] = true;
+      nextResult[p.studentId] = p.result;
+      if (p.result === "custom") nextCustomPoints[p.studentId] = p.customPoints;
+    });
+    setChecked(nextChecked);
+    setResultFor(nextResult);
+    setCustomPointsFor(nextCustomPoints);
+    setError("");
+  }
+
+  function cancelEdit() {
+    setEditingMatchId(null);
     setDate("");
     setChecked({});
     setResultFor({});
@@ -1782,14 +1858,7 @@ function MatchesTab({
                 <div className="flex flex-wrap gap-2">
                   {m.participants.map((p) => {
                     const s = students.find((st) => st.id === p.studentId);
-                    const colors = {
-                      win: { bg: "var(--gold-300)", text: "#5C4A0E" },
-                      draw: { bg: "#DDE2E6", text: "#3F454B" },
-                      loss: { bg: "var(--cream-100)", text: "var(--ink-500)" },
-                      foul: { bg: "#F2D4DC", text: "var(--crimson-600)" },
-                      custom: { bg: "#DCE4F5", text: "#324B7A" },
-                    };
-                    const c = colors[p.result] || colors.custom;
+                    const c = RESULT_COLORS[p.result] || RESULT_COLORS.custom;
                     const pts = pointsForParticipant(settings, m.event, p);
                     return (
                       <span key={p.studentId} className="text-xs px-2.5 py-1 rounded-full font-medium" style={{ backgroundColor: c.bg, color: c.text }}>
@@ -1920,10 +1989,20 @@ function MatchesTab({
         )}
       </div>
 
-      <div className="rounded-lg p-4 mb-8" style={{ border: "1px solid var(--border-soft)", backgroundColor: "white" }}>
-        <h3 className="lb-title text-lg mb-4" style={{ color: "var(--navy-950)" }}>
-          새 경기 등록
-        </h3>
+      <div
+        className="rounded-lg p-4 mb-8"
+        style={{ border: editingMatchId ? "1px solid var(--gold-500)" : "1px solid var(--border-soft)", backgroundColor: "white" }}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="lb-title text-lg" style={{ color: "var(--navy-950)" }}>
+            {editingMatchId ? "경기 수정" : "새 경기 등록"}
+          </h3>
+          {editingMatchId && (
+            <span className="text-xs px-2 py-1 rounded-full font-medium" style={{ backgroundColor: "var(--cream-100)", color: "var(--gold-500)" }}>
+              {formatDateKorean(date)} · {currentEventName} 수정 중
+            </span>
+          )}
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <div>
             <label className="flex items-center justify-between text-xs font-medium mb-1" style={{ color: "var(--ink-500)" }}>
@@ -2036,6 +2115,51 @@ function MatchesTab({
               </button>
             </div>
 
+            <div
+              className="flex flex-wrap items-center gap-2 mb-2 px-2 py-2 rounded-md"
+              style={{ backgroundColor: "var(--cream-100)" }}
+            >
+              <span className="text-xs font-medium" style={{ color: "var(--ink-700)" }}>
+                체크된 학생에게 결과 일괄 적용:
+              </span>
+              <select
+                value={bulkApplyResult}
+                onChange={(e) => setBulkApplyResult(e.target.value)}
+                className="px-2 py-1 rounded-md text-sm outline-none font-medium"
+                style={{ ...inputStyle, backgroundColor: RESULT_COLORS[bulkApplyResult].bg, color: RESULT_COLORS[bulkApplyResult].text }}
+              >
+                {Object.keys(RESULT_LABELS).map((key) => (
+                  <option key={key} value={key} style={{ backgroundColor: RESULT_COLORS[key].bg, color: RESULT_COLORS[key].text }}>
+                    {RESULT_LABELS[key]}
+                  </option>
+                ))}
+                <option value="custom" style={{ backgroundColor: RESULT_COLORS.custom.bg, color: RESULT_COLORS.custom.text }}>
+                  직접 입력
+                </option>
+              </select>
+              {bulkApplyResult === "custom" && (
+                <input
+                  type="number"
+                  value={bulkApplyCustomPoints}
+                  onChange={(e) => setBulkApplyCustomPoints(e.target.value)}
+                  placeholder="점수"
+                  className="lb-mono text-sm text-center rounded-md outline-none"
+                  style={{ ...inputStyle, width: 64 }}
+                />
+              )}
+              <button
+                onClick={applyBulkResultToChecked}
+                disabled={checkedCount === 0}
+                className="text-xs px-3 py-1.5 rounded-full font-medium"
+                style={{ backgroundColor: "var(--navy-950)", color: "var(--cream-50)", opacity: checkedCount === 0 ? 0.4 : 1 }}
+              >
+                체크된 {checkedCount}명에게 적용
+              </button>
+              <span className="text-xs w-full" style={{ color: "var(--ink-500)" }}>
+                전체선택·부분체크(개별로 몇 명만)·전체 해제로 원하는 학생만 체크한 뒤, 위에서 결과를 골라 한 번에 적용하세요.
+              </span>
+            </div>
+
             <div className="rounded-md overflow-hidden" style={{ border: "1px solid var(--border-soft)" }}>
               {visibleStudents.map((s, i) => (
                 <div
@@ -2052,19 +2176,26 @@ function MatchesTab({
                     value={resultFor[s.id] || "win"}
                     onChange={(e) => setResult(s.id, e.target.value)}
                     disabled={!checked[s.id]}
-                    className="px-2 py-1 rounded-md text-sm outline-none"
-                    style={{ ...inputStyle, opacity: checked[s.id] ? 1 : 0.4 }}
+                    className="px-2 py-1 rounded-md text-sm outline-none font-medium"
+                    style={{
+                      ...inputStyle,
+                      backgroundColor: RESULT_COLORS[resultFor[s.id] || "win"].bg,
+                      color: RESULT_COLORS[resultFor[s.id] || "win"].text,
+                      opacity: checked[s.id] ? 1 : 0.4,
+                    }}
                   >
                     {Object.keys(RESULT_LABELS).map((key) => {
                       const pts = pointsFor(settings, currentEventName, key);
                       return (
-                        <option key={key} value={key}>
+                        <option key={key} value={key} style={{ backgroundColor: RESULT_COLORS[key].bg, color: RESULT_COLORS[key].text }}>
                           {RESULT_LABELS[key]} ({pts > 0 ? "+" : ""}
                           {pts}점)
                         </option>
                       );
                     })}
-                    <option value="custom">직접 입력</option>
+                    <option value="custom" style={{ backgroundColor: RESULT_COLORS.custom.bg, color: RESULT_COLORS.custom.text }}>
+                      직접 입력
+                    </option>
                   </select>
                   {resultFor[s.id] === "custom" && (
                     <input
@@ -2089,9 +2220,16 @@ function MatchesTab({
           </p>
         )}
 
-        <button onClick={handleSubmit} className="mt-4 px-4 py-2 rounded-md text-sm font-medium" style={{ backgroundColor: "var(--navy-950)", color: "var(--cream-50)" }}>
-          경기 등록
-        </button>
+        <div className="flex gap-2 mt-4">
+          <button onClick={handleSubmit} className="px-4 py-2 rounded-md text-sm font-medium" style={{ backgroundColor: "var(--navy-950)", color: "var(--cream-50)" }}>
+            {editingMatchId ? "수정 저장" : "경기 등록"}
+          </button>
+          {editingMatchId && (
+            <button onClick={cancelEdit} className="px-4 py-2 rounded-md text-sm font-medium" style={{ border: "1px solid var(--border-soft)", color: "var(--ink-700)" }}>
+              취소
+            </button>
+          )}
+        </div>
       </div>
 
       <h3 className="lb-title text-lg mb-3" style={{ color: "var(--navy-950)" }}>
@@ -2113,21 +2251,19 @@ function MatchesTab({
                   </span>
                   <span className="text-sm font-medium">{m.event}</span>
                 </div>
-                <button onClick={() => removeMatch(m.id)} className="p-1.5 rounded-md hover:opacity-70">
-                  <Trash2 size={15} style={{ color: "var(--crimson-600)" }} />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => startEdit(m)} className="p-1.5 rounded-md hover:opacity-70">
+                    <Pencil size={15} style={{ color: "var(--navy-950)" }} />
+                  </button>
+                  <button onClick={() => removeMatch(m.id)} className="p-1.5 rounded-md hover:opacity-70">
+                    <Trash2 size={15} style={{ color: "var(--crimson-600)" }} />
+                  </button>
+                </div>
               </div>
               <div className="flex flex-wrap gap-2">
                 {m.participants.map((p) => {
                   const s = students.find((st) => st.id === p.studentId);
-                  const colors = {
-                    win: { bg: "var(--gold-300)", text: "#5C4A0E" },
-                    draw: { bg: "#DDE2E6", text: "#3F454B" },
-                    loss: { bg: "var(--cream-100)", text: "var(--ink-500)" },
-                    foul: { bg: "#F2D4DC", text: "var(--crimson-600)" },
-                    custom: { bg: "#DCE4F5", text: "#324B7A" },
-                  };
-                  const c = colors[p.result] || colors.custom;
+                  const c = RESULT_COLORS[p.result] || RESULT_COLORS.custom;
                   const pts = pointsForParticipant(settings, m.event, p);
                   return (
                     <span key={p.studentId} className="text-xs px-2.5 py-1 rounded-full font-medium" style={{ backgroundColor: c.bg, color: c.text }}>
