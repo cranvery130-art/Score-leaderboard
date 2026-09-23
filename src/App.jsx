@@ -2534,8 +2534,8 @@ function SettingsTab({
           </button>
           <button
             onClick={() => setLeaveModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium"
-            style={{ border: "1px solid var(--border-soft)", color: "var(--ink-500)" }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-semibold"
+            style={{ backgroundColor: "var(--navy-950)", color: "var(--cream-50)", boxShadow: "0 2px 8px rgba(11,27,51,0.25)" }}
           >
             <LogOut size={14} /> 다른 코드로 전환
           </button>
