@@ -22,6 +22,10 @@ import {
   RefreshCw,
   Settings,
   KeyRound,
+  BookOpen,
+  HelpCircle,
+  Sparkles,
+  ListChecks,
 } from "lucide-react";
 import {
   readWorkspaceConfig,
@@ -386,6 +390,38 @@ function ConfirmModal({ title, message, confirmLabel = "확인", danger, onConfi
   );
 }
 
+function InfoModal({ title, icon: Icon, onClose, children }) {
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 flex items-center justify-center p-4"
+      style={{ backgroundColor: "rgba(11,27,51,0.55)", zIndex: 60 }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full rounded-2xl overflow-hidden flex flex-col"
+        style={{ maxWidth: 620, maxHeight: "85vh", backgroundColor: "var(--cream-50)" }}
+      >
+        <div
+          className="flex items-center justify-between px-6 py-4 flex-shrink-0"
+          style={{ background: "linear-gradient(135deg, var(--navy-950), var(--navy-800))" }}
+        >
+          <h2 className="lb-title text-xl flex items-center gap-2" style={{ color: "var(--cream-50)" }}>
+            {Icon && <Icon size={20} style={{ color: "var(--gold-300)" }} />}
+            {title}
+          </h2>
+          <button onClick={onClose} className="p-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: "rgba(255,255,255,0.12)" }}>
+            <X size={16} color="white" />
+          </button>
+        </div>
+        <div className="px-6 py-5 overflow-y-auto" style={{ flex: 1 }}>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Toast({ toast }) {
   if (!toast) return null;
   return (
@@ -416,6 +452,7 @@ function Dashboard({ workspaceCode, onLeaveWorkspace, role, myName, deviceId, on
   const [tab, setTab] = useState("leaderboard");
   const [saveState, setSaveState] = useState("idle");
   const [confirmModal, setConfirmModal] = useState(null);
+  const [showFeatureGuide, setShowFeatureGuide] = useState(false);
   const [toast, setToast] = useState(null);
   const skipFirstSave = useRef(true);
 
@@ -597,13 +634,20 @@ function Dashboard({ workspaceCode, onLeaveWorkspace, role, myName, deviceId, on
       `}</style>
 
       <header style={{ background: "linear-gradient(135deg, var(--navy-950), var(--navy-800))", padding: "2rem 1.5rem 1.75rem" }}>
-        <div className="max-w-4xl mx-auto flex items-start justify-between gap-3 mb-1">
+        <div className="max-w-4xl mx-auto flex items-center justify-between gap-3 mb-1">
           <span
             className="lb-mono text-xs px-2.5 py-1 rounded-full flex items-center gap-1.5"
             style={{ backgroundColor: "rgba(255,255,255,0.08)", color: "var(--gold-300)" }}
           >
             <KeyRound size={12} /> {workspaceCode}
           </span>
+          <button
+            onClick={() => setShowFeatureGuide(true)}
+            className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium"
+            style={{ backgroundColor: "rgba(228,199,101,0.16)", color: "var(--gold-300)", border: "1px solid rgba(228,199,101,0.4)" }}
+          >
+            <HelpCircle size={13} /> 기능 설명
+          </button>
         </div>
         <div className="max-w-4xl mx-auto flex items-center gap-4">
           <TrophyEmblem size={56} />
@@ -775,6 +819,70 @@ function Dashboard({ workspaceCode, onLeaveWorkspace, role, myName, deviceId, on
           onConfirm={confirmModal.onConfirm}
           onCancel={closeConfirm}
         />
+      )}
+
+      {showFeatureGuide && (
+        <InfoModal title="기능 설명" icon={HelpCircle} onClose={() => setShowFeatureGuide(false)}>
+          <div className="flex flex-col gap-5">
+            {[
+              {
+                icon: Trophy,
+                title: "리더보드",
+                points: [
+                  "학생별 누적 승점을 자동으로 계산해 순위대로 보여줘요. 동점자는 공동 순위로 처리돼요.",
+                  "상위 3명은 시상대로, 이름 옆 점들은 경기별 결과(승/무/패/부정행위)를 색으로 나타내요.",
+                  "이 탭만 화면에 띄우면 그대로 빔프로젝터·전광판으로 쓸 수 있어요.",
+                ],
+              },
+              {
+                icon: Users,
+                title: "명단 관리",
+                points: [
+                  "학년·반·번호·이름·성별로 학생을 등록해요. 엑셀 파일을 끌어다 놓으면 한 번에 여러 명을 올릴 수 있어요.",
+                  "체크박스로 여러 명을 선택해 한꺼번에 삭제하거나 성별을 바꿀 수 있어요.",
+                  "방금 엑셀로 올린 명단은 '되돌리기'로 취소할 수 있어요.",
+                ],
+              },
+              {
+                icon: CalendarDays,
+                title: "경기 기록",
+                points: [
+                  "날짜는 달력에서 바로 고르고, 종목을 정한 뒤 참가한 학생을 체크해요.",
+                  "'승점 기준 설정'에서 승/무/패/부정행위 점수를 직접 정할 수 있고, '종목별 기준'으로 바꾸면 종목마다 다른 점수도 줄 수 있어요(예: 축구는 승리 3점, 배드민턴은 2점).",
+                  "등록한 경기는 언제든 목록에서 확인·삭제할 수 있어요.",
+                ],
+              },
+              {
+                icon: Settings,
+                title: "설정",
+                points: [
+                  "코드를 복사하거나 다른 코드로 전환할 수 있고, 개설자는 조회·개설자 비밀번호를 여기서 바꿀 수 있어요.",
+                  "개설자는 '구성원 및 접근 권한 관리'에서 동료 선생님의 수정 권한 신청을 승인·거절하거나 권한을 취소할 수 있어요.",
+                  "'데이터 관리'에서 엑셀로 현재 기록을 내려받을 수 있고(누구나 가능), 개설자는 JSON 백업·복원도 할 수 있어요.",
+                  "시즌이 끝나면 개설자가 '마감'으로 이 코드의 모든 데이터를 정리하고 첫 화면으로 돌아갈 수 있어요(백업 필수).",
+                ],
+              },
+            ].map((section) => (
+              <div key={section.title}>
+                <h3 className="lb-title text-base mb-2 flex items-center gap-1.5" style={{ color: "var(--navy-950)" }}>
+                  <section.icon size={16} style={{ color: "var(--gold-500)" }} /> {section.title}
+                </h3>
+                <ul className="flex flex-col gap-1.5">
+                  {section.points.map((p, i) => (
+                    <li key={i} className="text-sm flex gap-2" style={{ color: "var(--ink-700)" }}>
+                      <span style={{ color: "var(--gold-500)" }}>·</span>
+                      <span>{p}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+
+            <div className="pt-3 text-xs" style={{ borderTop: "1px solid var(--border-soft)", color: "var(--ink-500)" }}>
+              여러 기기에서 동시에 열어두면, 다른 사람이 저장한 내용이 자동으로 화면에 반영돼요. 접근 권한이 바뀌면(승인·취소) 그것도 실시간으로 반영됩니다.
+            </div>
+          </div>
+        </InfoModal>
       )}
     </div>
   );
@@ -2460,6 +2568,7 @@ function WorkspaceGate({ lastCode, onFounderLogin, onCreateCode, onRequestAccess
   const [showFounderPasswordNew, setShowFounderPasswordNew] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
 
   const [agree, setAgree] = useState(false);
   const [name, setName] = useState("");
@@ -2655,9 +2764,23 @@ function WorkspaceGate({ lastCode, onFounderLogin, onCreateCode, onRequestAccess
         <h1 className="lb-title text-2xl text-center mb-1 tracking-wide" style={{ color: "var(--navy-950)" }}>
           P.E SCORE LEADERBOARD
         </h1>
-        <p className="text-sm text-center mb-6" style={{ color: "var(--ink-500)" }}>
+        <p className="text-sm text-center mb-5" style={{ color: "var(--ink-500)" }}>
           수업, 행사에서 개인, 팀, 반의 성적을 빔프로젝터, 화면, 모바일로 공유할 수 있어요.
         </p>
+
+        <button
+          onClick={() => setShowGuide(true)}
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-full text-sm font-semibold mb-6"
+          style={{
+            background: "linear-gradient(135deg, var(--gold-300), var(--gold-500))",
+            color: "var(--navy-950)",
+            boxShadow: "0 4px 14px rgba(201,162,39,0.35)",
+          }}
+        >
+          <BookOpen size={16} />
+          사용설명서 — 이렇게 활용해보세요
+          <Sparkles size={14} />
+        </button>
 
         <label className="block text-xs font-medium mb-1" style={{ color: "var(--ink-500)" }}>
           코드
@@ -2779,6 +2902,70 @@ function WorkspaceGate({ lastCode, onFounderLogin, onCreateCode, onRequestAccess
           </>
         )}
       </div>
+
+      {showGuide && (
+        <InfoModal title="사용설명서" icon={BookOpen} onClose={() => setShowGuide(false)}>
+          <div className="mb-6">
+            <h3 className="lb-title text-base mb-3 flex items-center gap-1.5" style={{ color: "var(--navy-950)" }}>
+              <Sparkles size={16} style={{ color: "var(--gold-500)" }} /> 이런 곳에 활용해보세요
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {[
+                { title: "학교스포츠클럽 리그전", desc: "종목별 승점을 누적해 시즌 최다 승점자를 가려요." },
+                { title: "체육대회 종합 순위", desc: "개인전·단체전 점수를 한 화면에서 실시간 집계해요." },
+                { title: "체육수업 미니 게임", desc: "한 차시 안에서 팀별 승점을 즉석으로 매기고 보여줘요." },
+                { title: "학급 대항전", desc: "반별 대표가 각자 태블릿으로 입력하고 함께 관리해요." },
+                { title: "방과후 스포츠클럽", desc: "시즌 내내 누적 기록을 쌓아 학기말 시상까지 이어가요." },
+                { title: "빔프로젝터 전광판", desc: "리더보드 탭만 띄워 강당·운동장 대형 화면으로 공유해요." },
+              ].map((item) => (
+                <div key={item.title} className="rounded-lg p-3" style={{ backgroundColor: "var(--cream-100)" }}>
+                  <div className="text-sm font-semibold mb-0.5" style={{ color: "var(--navy-950)" }}>
+                    {item.title}
+                  </div>
+                  <div className="text-xs" style={{ color: "var(--ink-500)" }}>
+                    {item.desc}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <h3 className="lb-title text-base mb-3 flex items-center gap-1.5" style={{ color: "var(--navy-950)" }}>
+              <ListChecks size={16} style={{ color: "var(--gold-500)" }} /> 4단계로 시작하기
+            </h3>
+            <div className="flex flex-col gap-3">
+              {[
+                { n: 1, title: "코드 만들기", desc: "원하는 코드(예: 3반체육왕2026)와 비밀번호 두 개(개설자 전용 / 조회용)를 정해 새 코드를 만들어요. 이 코드로 어떤 기기에서든 같은 데이터를 이어서 관리해요." },
+                { n: 2, title: "명단 등록", desc: "'명단 관리' 탭에서 학생을 엑셀로 한 번에 올리거나 직접 추가해요." },
+                { n: 3, title: "경기 기록", desc: "'경기 기록' 탭에서 날짜·종목을 고르고 참가자를 체크해 승/무/패 결과를 입력해요." },
+                { n: 4, title: "리더보드 공유", desc: "'리더보드' 탭이 자동으로 순위를 계산해요. 이 화면만 빔프로젝터나 모바일로 띄워 실시간으로 보여주세요." },
+              ].map((s) => (
+                <div key={s.n} className="flex gap-3">
+                  <div
+                    className="lb-mono flex items-center justify-center rounded-full flex-shrink-0 font-semibold"
+                    style={{ width: 26, height: 26, backgroundColor: "var(--navy-950)", color: "var(--gold-300)", fontSize: 13 }}
+                  >
+                    {s.n}
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold" style={{ color: "var(--navy-950)" }}>
+                      {s.title}
+                    </div>
+                    <div className="text-xs mt-0.5" style={{ color: "var(--ink-500)" }}>
+                      {s.desc}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-6 pt-4 text-xs" style={{ borderTop: "1px solid var(--border-soft)", color: "var(--ink-500)" }}>
+            동료 선생님과 함께 관리하려면, 코드와 조회 비밀번호를 안내해 "접근 신청"으로 들어오게 하세요. 명단·기록 수정까지 맡기려면 신청 시 "수정 권한도 필요합니다"에 체크하도록 안내하면, 개설자가 승인한 뒤 함께 입력할 수 있어요.
+          </div>
+        </InfoModal>
+      )}
     </div>
   );
 }
