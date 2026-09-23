@@ -2652,11 +2652,11 @@ function WorkspaceGate({ lastCode, onFounderLogin, onCreateCode, onRequestAccess
         <div className="flex justify-center mb-3">
           <TrophyEmblem size={64} />
         </div>
-        <h1 className="lb-title text-2xl text-center mb-1" style={{ color: "var(--navy-950)" }}>
-          체육행사 승점 대시보드
+        <h1 className="lb-title text-2xl text-center mb-1 tracking-wide" style={{ color: "var(--navy-950)" }}>
+          P.E SCORE LEADERBOARD
         </h1>
         <p className="text-sm text-center mb-6" style={{ color: "var(--ink-500)" }}>
-          코드 하나로 데스크톱과 모바일 어디서든 같은 데이터를 이어서 관리해요.
+          수업, 행사에서 개인, 팀, 반의 성적을 빔프로젝터, 화면, 모바일로 공유할 수 있어요.
         </p>
 
         <label className="block text-xs font-medium mb-1" style={{ color: "var(--ink-500)" }}>
