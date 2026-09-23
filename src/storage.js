@@ -63,3 +63,35 @@ export function removeLocal(key) {
     // ignore
   }
 }
+
+// 학생 이름표 — 학생 id → 실명 매핑. 절대 Firestore에 올라가지 않고,
+// 이 브라우저(기기)의 localStorage에만 남습니다. 코드별로 따로 보관해요.
+const NAME_MAP_PREFIX = "namemap:";
+
+export function getNameMap(code) {
+  try {
+    const raw = localStorage.getItem(NAME_MAP_PREFIX + code);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    return {};
+  }
+}
+export function setNameMap(code, map) {
+  try {
+    localStorage.setItem(NAME_MAP_PREFIX + code, JSON.stringify(map));
+  } catch (e) {
+    // ignore
+  }
+}
+export function mergeNameMap(code, partial) {
+  const next = { ...getNameMap(code), ...partial };
+  setNameMap(code, next);
+  return next;
+}
+export function removeNameMap(code) {
+  try {
+    localStorage.removeItem(NAME_MAP_PREFIX + code);
+  } catch (e) {
+    // ignore
+  }
+}

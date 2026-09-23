@@ -39,6 +39,9 @@ import {
   getLocal,
   setLocal,
   removeLocal,
+  getNameMap,
+  mergeNameMap,
+  removeNameMap,
 } from "./storage";
 
 const GENDERS = [
@@ -47,8 +50,9 @@ const GENDERS = [
 ];
 const SCHOOL_GRADES = [1, 2, 3];
 const RESULT_LABELS = { win: "승", draw: "무", loss: "패", foul: "부정행위" };
+const RESULT_LABELS_WITH_CUSTOM = { ...RESULT_LABELS, custom: "직접 입력" };
 const DEFAULT_POINTS = { win: 2, draw: 1, loss: 0, foul: -1 };
-const RESULT_DOT_COLOR = { win: "#C9A227", draw: "#9AA5B1", loss: "#D9D3C2", foul: "#8C2138" };
+const RESULT_DOT_COLOR = { win: "#C9A227", draw: "#9AA5B1", loss: "#D9D3C2", foul: "#8C2138", custom: "#5B7FBD" };
 const EVENT_PRESETS = ["축구", "피구", "배드민턴", "농구", "발야구", "줄넘기", "티볼", "탁구"];
 const LAST_CODE_KEY = "last-code";
 const LAST_NAME_KEY = "last-name";
@@ -126,7 +130,7 @@ function computeStandings(students, matches, settings) {
     m.participants.forEach((p) => {
       const row = byId[p.studentId];
       if (!row) return;
-      row.total += pointsFor(settings, m.event, p.result);
+      row.total += pointsForParticipant(settings, m.event, p);
       row.played += 1;
       row.history.push({ result: p.result, event: m.event, date: m.date });
     });
@@ -150,6 +154,13 @@ function pointsFor(settings, event, result) {
   return cfg[result] ?? 0;
 }
 
+// 참가자 한 명의 실제 득점. result가 "custom"이면 그 경기·그 학생에 직접 입력한 점수를,
+// 그 외에는 승/무/패/부정행위 기준표 값을 그대로 씁니다.
+function pointsForParticipant(settings, event, participant) {
+  if (participant.result === "custom") return Number(participant.customPoints) || 0;
+  return pointsFor(settings, event, participant.result);
+}
+
 function buildEventsFromData(data) {
   const byName = {};
   const order = [];
@@ -169,6 +180,19 @@ function buildEventsFromData(data) {
   }
   (data && data.matches ? data.matches : []).forEach((m) => upsert(m.event));
   return order.map((name) => byName[name]);
+}
+
+// 학생 이름은 이 기기에만 저장되고 Firestore에는 올라가지 않습니다.
+// 서버에서 막 받아온 학생에게 이 기기가 아직 이름표를 안 붙여줬다면,
+// 학년-반-번호로 대신 표시합니다.
+function displayName(s) {
+  if (!s) return "";
+  if (s.name && s.name.trim()) return s.name;
+  return `${s.grade}-${s.classNum}-${s.number} (이름 미등록)`;
+}
+
+function stripNames(students) {
+  return students.map(({ name, ...rest }) => rest);
 }
 
 function formatDateKorean(iso) {
@@ -476,6 +500,13 @@ function Dashboard({ workspaceCode, onLeaveWorkspace, role, myName, deviceId, on
     if (!data) return;
     if (data.title) setTitle(data.title);
     if (Array.isArray(data.students)) {
+      // 서버(Firestore)에는 이름이 없습니다. 이 데이터에 이름이 들어있다면
+      // JSON 백업을 불러온 경우이므로, 그 이름을 이 기기의 이름표에 반영합니다.
+      const incoming = {};
+      data.students.forEach((s) => {
+        if (s.name && s.name.trim()) incoming[s.id] = s.name.trim();
+      });
+      const nameMap = Object.keys(incoming).length > 0 ? mergeNameMap(workspaceCode, incoming) : getNameMap(workspaceCode);
       setStudents(
         data.students.map((s, i) => ({
           grade: 1,
@@ -483,6 +514,7 @@ function Dashboard({ workspaceCode, onLeaveWorkspace, role, myName, deviceId, on
           number: i + 1,
           gender: "M",
           ...s,
+          name: nameMap[s.id] || "",
         }))
       );
     } else {
@@ -492,6 +524,19 @@ function Dashboard({ workspaceCode, onLeaveWorkspace, role, myName, deviceId, on
     setPointsConfig(data.pointsConfig ? { ...DEFAULT_POINTS, ...data.pointsConfig } : DEFAULT_POINTS);
     setPointsMode(data.pointsMode || "global");
     setEvents(buildEventsFromData(data));
+  }
+
+  // students를 바꿀 때마다, 이름이 있는 항목은 이 기기의 이름표(로컬)에도 함께 저장합니다.
+  function setStudentsAndSyncNames(next) {
+    setStudents((prev) => {
+      const resolved = typeof next === "function" ? next(prev) : next;
+      const patch = {};
+      resolved.forEach((s) => {
+        if (s.name && s.name.trim()) patch[s.id] = s.name.trim();
+      });
+      if (Object.keys(patch).length > 0) mergeNameMap(workspaceCode, patch);
+      return resolved;
+    });
   }
 
   // 실시간 구독: 다른 기기/구성원이 저장하면 이 화면에도 곧바로 반영됩니다.
@@ -516,7 +561,7 @@ function Dashboard({ workspaceCode, onLeaveWorkspace, role, myName, deviceId, on
       try {
         await writeWorkspaceData(workspaceCode, {
           title,
-          students,
+          students: stripNames(students),
           matches,
           pointsConfig,
           pointsMode,
@@ -548,6 +593,11 @@ function Dashboard({ workspaceCode, onLeaveWorkspace, role, myName, deviceId, on
     return () => unsubscribe();
   }, [role, workspaceCode, onRefreshRole]);
 
+  function refreshNamesFromLocalMap() {
+    const map = getNameMap(workspaceCode);
+    setStudents((prev) => prev.map((s) => ({ ...s, name: map[s.id] || s.name || "" })));
+  }
+
   async function closeoutWorkspace() {
     try {
       await deleteWorkspaceData(workspaceCode);
@@ -564,6 +614,7 @@ function Dashboard({ workspaceCode, onLeaveWorkspace, role, myName, deviceId, on
     } catch (e) {
       // ignore
     }
+    removeNameMap(workspaceCode);
     onLeaveWorkspace();
   }
 
@@ -739,7 +790,7 @@ function Dashboard({ workspaceCode, onLeaveWorkspace, role, myName, deviceId, on
         {tab === "roster" && (
           <RosterManager
             students={students}
-            setStudents={setStudents}
+            setStudents={setStudentsAndSyncNames}
             showToast={showToast}
             openConfirm={openConfirm}
             closeConfirm={closeConfirm}
@@ -779,6 +830,7 @@ function Dashboard({ workspaceCode, onLeaveWorkspace, role, myName, deviceId, on
             myName={myName}
             deviceId={deviceId}
             canManageAccess={canManageAccess}
+            refreshNamesFromLocalMap={refreshNamesFromLocalMap}
           />
         )}
       </main>
@@ -799,6 +851,7 @@ function Dashboard({ workspaceCode, onLeaveWorkspace, role, myName, deviceId, on
               onConfirm: () => {
                 setStudents([]);
                 setMatches([]);
+                removeNameMap(workspaceCode);
                 closeConfirm();
               },
             })
@@ -841,6 +894,7 @@ function Dashboard({ workspaceCode, onLeaveWorkspace, role, myName, deviceId, on
                   "학년·반·번호·이름·성별로 학생을 등록해요. 엑셀 파일을 끌어다 놓으면 한 번에 여러 명을 올릴 수 있어요.",
                   "체크박스로 여러 명을 선택해 한꺼번에 삭제하거나 성별을 바꿀 수 있어요.",
                   "방금 엑셀로 올린 명단은 '되돌리기'로 취소할 수 있어요.",
+                  "학생 이름은 이 기기(브라우저)에만 저장되고 서버에는 올라가지 않아요. 다른 기기에서는 이름 칸이 비어 보일 수 있는데, 그 자리를 클릭해 이름을 입력하면 그 기기에도 저장돼요.",
                 ],
               },
               {
@@ -848,7 +902,9 @@ function Dashboard({ workspaceCode, onLeaveWorkspace, role, myName, deviceId, on
                 title: "경기 기록",
                 points: [
                   "날짜는 달력에서 바로 고르고, 종목을 정한 뒤 참가한 학생을 체크해요.",
-                  "'승점 기준 설정'에서 승/무/패/부정행위 점수를 직접 정할 수 있고, '종목별 기준'으로 바꾸면 종목마다 다른 점수도 줄 수 있어요(예: 축구는 승리 3점, 배드민턴은 2점).",
+                  "'승점 기준 설정'에서 승/무/패/부정행위 점수를 직접 정할 수 있고, '종목별 기준'으로 바꾸면 종목마다 다른 점수도 줄 수 있어요(예: 축구는 승리 3점, 배드민턴은 2점). 종목별 기준은 표에서 종목을 직접 추가·삭제해요.",
+                  "참가자별 결과 선택에는 '직접 입력'도 있어서, 정해진 승/무/패 점수 대신 그 학생·그 경기에만 적용할 점수를 바로 입력할 수 있어요.",
+                  "'전체 승 / 전체 무 / 전체 패 / 전체 부정행위' 버튼으로, 지금 화면에 보이는(필터된) 학생 전체를 한 번에 체크하고 같은 결과로 일괄 지정할 수 있어요. '전체 해제'로 체크를 한 번에 풀 수도 있어요.",
                   "등록한 경기는 언제든 목록에서 확인·삭제할 수 있어요.",
                 ],
               },
@@ -859,6 +915,7 @@ function Dashboard({ workspaceCode, onLeaveWorkspace, role, myName, deviceId, on
                   "코드를 복사하거나 다른 코드로 전환할 수 있고, 개설자는 조회·개설자 비밀번호를 여기서 바꿀 수 있어요.",
                   "개설자는 '구성원 및 접근 권한 관리'에서 동료 선생님의 수정 권한 신청을 승인·거절하거나 권한을 취소할 수 있어요.",
                   "'데이터 관리'에서 엑셀로 현재 기록을 내려받을 수 있고(누구나 가능), 개설자는 JSON 백업·복원도 할 수 있어요.",
+                  "'학생 이름표'에서 이 기기에 저장된 이름을 파일로 내보내 다른 기기로 옮기거나, 다른 기기가 내보낸 이름표 파일을 가져와 이 기기에 반영할 수 있어요.",
                   "시즌이 끝나면 개설자가 '마감'으로 이 코드의 모든 데이터를 정리하고 첫 화면으로 돌아갈 수 있어요(백업 필수).",
                 ],
               },
@@ -879,7 +936,7 @@ function Dashboard({ workspaceCode, onLeaveWorkspace, role, myName, deviceId, on
             ))}
 
             <div className="pt-3 text-xs" style={{ borderTop: "1px solid var(--border-soft)", color: "var(--ink-500)" }}>
-              여러 기기에서 동시에 열어두면, 다른 사람이 저장한 내용이 자동으로 화면에 반영돼요. 접근 권한이 바뀌면(승인·취소) 그것도 실시간으로 반영됩니다.
+              여러 기기에서 동시에 열어두면, 다른 사람이 저장한 내용이 자동으로 화면에 반영돼요. 접근 권한이 바뀌면(승인·취소) 그것도 실시간으로 반영됩니다. (단, 학생 이름은 서버로 동기화되지 않아 기기마다 따로 등록해야 해요.)
             </div>
           </div>
         </InfoModal>
@@ -975,7 +1032,7 @@ function LeaderboardTab({ sorted, groups, podiumOrder, students }) {
                     className={g.rank === 1 ? "font-semibold text-base leading-snug" : "font-medium text-sm leading-snug"}
                     style={{ color: "var(--cream-50)" }}
                   >
-                    {r.student.name}
+                    {displayName(r.student)}
                   </div>
                 ))}
               </div>
@@ -1046,7 +1103,7 @@ function LeaderboardTab({ sorted, groups, podiumOrder, students }) {
                   )}
                 </span>
                 <span className="flex flex-col">
-                  <span className="font-medium">{row.student.name}</span>
+                  <span className="font-medium">{displayName(row.student)}</span>
                   <span className="text-xs" style={{ color: "var(--ink-500)" }}>
                     {row.student.grade}학년 {row.student.classNum}반 {row.student.number}번
                   </span>
@@ -1055,7 +1112,7 @@ function LeaderboardTab({ sorted, groups, podiumOrder, students }) {
                       {row.history.map((h, i) => (
                         <span
                           key={i}
-                          title={`${h.date} ${h.event} · ${RESULT_LABELS[h.result]}`}
+                          title={`${h.date} ${h.event} · ${RESULT_LABELS_WITH_CUSTOM[h.result]}`}
                           style={{ width: 7, height: 7, borderRadius: "50%", backgroundColor: RESULT_DOT_COLOR[h.result] }}
                         />
                       ))}
@@ -1263,7 +1320,7 @@ function RosterManager({ students, setStudents, showToast, openConfirm, closeCon
               <span className="lb-mono text-xs" style={{ color: "var(--ink-500)", width: 56 }}>
                 {s.grade}-{s.classNum}-{s.number}
               </span>
-              <span className="font-medium flex-1">{s.name}</span>
+              <span className="font-medium flex-1">{displayName(s)}</span>
               <span className="text-xs" style={{ color: "var(--ink-500)" }}>
                 {s.gender === "M" ? "남" : "여"}
               </span>
@@ -1505,7 +1562,18 @@ function RosterManager({ students, setStudents, showToast, openConfirm, closeCon
               <span className="lb-mono text-xs" style={{ color: "var(--ink-500)", width: 56 }}>
                 {s.grade}-{s.classNum}-{s.number}
               </span>
-              <span className="font-medium flex-1">{s.name}</span>
+              <input
+                defaultValue={s.name}
+                key={s.id + ":" + s.name}
+                onBlur={(e) => {
+                  const v = e.target.value.trim();
+                  if (v !== s.name) setStudents(students.map((st) => (st.id === s.id ? { ...st, name: v } : st)));
+                }}
+                placeholder="이름 (이 기기에만 저장)"
+                className="font-medium flex-1 px-1.5 py-0.5 rounded outline-none"
+                style={{ border: "1px solid transparent" }}
+                onFocus={(e) => (e.target.style.border = "1px solid var(--border-soft)")}
+              />
               <div className="flex gap-1">
                 {GENDERS.map((g) => (
                   <button
@@ -1550,6 +1618,7 @@ function MatchesTab({
   const [customEvent, setCustomEvent] = useState("");
   const [checked, setChecked] = useState({});
   const [resultFor, setResultFor] = useState({});
+  const [customPointsFor, setCustomPointsFor] = useState({});
   const [filterGrade, setFilterGrade] = useState("ALL");
   const [filterClass, setFilterClass] = useState("ALL");
   const [error, setError] = useState("");
@@ -1591,15 +1660,53 @@ function MatchesTab({
     }
   }
 
+  // 지금 보이는(필터된) 학생 전체를 한 번에 체크하고 같은 결과로 일괄 지정해요.
+  function bulkSetResult(resultKey) {
+    setChecked((prev) => {
+      const next = { ...prev };
+      visibleStudents.forEach((s) => {
+        next[s.id] = true;
+      });
+      return next;
+    });
+    setResultFor((prev) => {
+      const next = { ...prev };
+      visibleStudents.forEach((s) => {
+        next[s.id] = resultKey;
+      });
+      return next;
+    });
+  }
+
+  function uncheckAll() {
+    setChecked((prev) => {
+      const next = { ...prev };
+      visibleStudents.forEach((s) => {
+        next[s.id] = false;
+      });
+      return next;
+    });
+  }
+
   function setResult(id, value) {
     setResultFor((prev) => ({ ...prev, [id]: value }));
+  }
+
+  function setCustomPoints(id, value) {
+    setCustomPointsFor((prev) => ({ ...prev, [id]: value }));
   }
 
   function handleSubmit() {
     const finalEvent = event === "__custom__" ? customEvent.trim() : event;
     const participants = Object.keys(checked)
       .filter((id) => checked[id])
-      .map((studentId) => ({ studentId, result: resultFor[studentId] || "win" }));
+      .map((studentId) => {
+        const result = resultFor[studentId] || "win";
+        if (result === "custom") {
+          return { studentId, result, customPoints: Number(customPointsFor[studentId]) || 0 };
+        }
+        return { studentId, result };
+      });
 
     if (!date) {
       setError("경기 날짜를 선택해 주세요.");
@@ -1617,6 +1724,7 @@ function MatchesTab({
     setDate("");
     setChecked({});
     setResultFor({});
+    setCustomPointsFor({});
     setCustomEvent("");
     setError("");
   }
@@ -1679,12 +1787,13 @@ function MatchesTab({
                       draw: { bg: "#DDE2E6", text: "#3F454B" },
                       loss: { bg: "var(--cream-100)", text: "var(--ink-500)" },
                       foul: { bg: "#F2D4DC", text: "var(--crimson-600)" },
+                      custom: { bg: "#DCE4F5", text: "#324B7A" },
                     };
-                    const c = colors[p.result];
-                    const pts = pointsFor(settings, m.event, p.result);
+                    const c = colors[p.result] || colors.custom;
+                    const pts = pointsForParticipant(settings, m.event, p);
                     return (
                       <span key={p.studentId} className="text-xs px-2.5 py-1 rounded-full font-medium" style={{ backgroundColor: c.bg, color: c.text }}>
-                        {s ? s.name : "삭제된 학생"} · {RESULT_LABELS[p.result]} {pts > 0 ? "+" : ""}
+                        {s ? displayName(s) : "삭제된 학생"} · {RESULT_LABELS_WITH_CUSTOM[p.result]} {pts > 0 ? "+" : ""}
                         {pts}
                       </span>
                     );
@@ -1908,6 +2017,25 @@ function MatchesTab({
               </span>
             </div>
 
+            <div className="flex flex-wrap items-center gap-1.5 mb-2">
+              <span className="text-xs" style={{ color: "var(--ink-500)" }}>
+                일괄 처리:
+              </span>
+              {Object.keys(RESULT_LABELS).map((key) => (
+                <button
+                  key={key}
+                  onClick={() => bulkSetResult(key)}
+                  className="text-xs px-2.5 py-1 rounded-full font-medium"
+                  style={{ backgroundColor: "var(--cream-100)", color: "var(--navy-950)" }}
+                >
+                  전체 {RESULT_LABELS[key]}
+                </button>
+              ))}
+              <button onClick={uncheckAll} className="text-xs px-2.5 py-1 rounded-full font-medium" style={{ color: "var(--ink-500)", border: "1px solid var(--border-soft)" }}>
+                전체 해제
+              </button>
+            </div>
+
             <div className="rounded-md overflow-hidden" style={{ border: "1px solid var(--border-soft)" }}>
               {visibleStudents.map((s, i) => (
                 <div
@@ -1919,7 +2047,7 @@ function MatchesTab({
                   <span className="lb-mono text-xs" style={{ color: "var(--ink-500)", width: 56 }}>
                     {s.grade}-{s.classNum}-{s.number}
                   </span>
-                  <span className="flex-1">{s.name}</span>
+                  <span className="flex-1">{displayName(s)}</span>
                   <select
                     value={resultFor[s.id] || "win"}
                     onChange={(e) => setResult(s.id, e.target.value)}
@@ -1936,7 +2064,19 @@ function MatchesTab({
                         </option>
                       );
                     })}
+                    <option value="custom">직접 입력</option>
                   </select>
+                  {resultFor[s.id] === "custom" && (
+                    <input
+                      type="number"
+                      value={customPointsFor[s.id] ?? ""}
+                      onChange={(e) => setCustomPoints(s.id, e.target.value)}
+                      disabled={!checked[s.id]}
+                      placeholder="점수"
+                      className="lb-mono text-sm text-center rounded-md outline-none"
+                      style={{ ...inputStyle, width: 64, opacity: checked[s.id] ? 1 : 0.4 }}
+                    />
+                  )}
                 </div>
               ))}
             </div>
@@ -1985,12 +2125,13 @@ function MatchesTab({
                     draw: { bg: "#DDE2E6", text: "#3F454B" },
                     loss: { bg: "var(--cream-100)", text: "var(--ink-500)" },
                     foul: { bg: "#F2D4DC", text: "var(--crimson-600)" },
+                    custom: { bg: "#DCE4F5", text: "#324B7A" },
                   };
-                  const c = colors[p.result];
-                  const pts = pointsFor(settings, m.event, p.result);
+                  const c = colors[p.result] || colors.custom;
+                  const pts = pointsForParticipant(settings, m.event, p);
                   return (
                     <span key={p.studentId} className="text-xs px-2.5 py-1 rounded-full font-medium" style={{ backgroundColor: c.bg, color: c.text }}>
-                      {s ? s.name : "삭제된 학생"} · {RESULT_LABELS[p.result]} {pts > 0 ? "+" : ""}
+                      {s ? displayName(s) : "삭제된 학생"} · {RESULT_LABELS_WITH_CUSTOM[p.result]} {pts > 0 ? "+" : ""}
                       {pts}
                     </span>
                   );
@@ -2020,6 +2161,7 @@ function SettingsTab({
   myName,
   deviceId,
   canManageAccess,
+  refreshNamesFromLocalMap,
 }) {
   const [copied, setCopied] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -2071,7 +2213,7 @@ function SettingsTab({
       g.rows.forEach((row) => {
         leaderboardRows.push({
           순위: g.rank,
-          이름: row.student.name,
+          이름: displayName(row.student),
           학년: row.student.grade,
           반: row.student.classNum,
           번호: row.student.number,
@@ -2096,12 +2238,12 @@ function SettingsTab({
         matchRows.push({
           날짜: m.date,
           종목: m.event,
-          이름: s ? s.name : "삭제된 학생",
+          이름: s ? displayName(s) : "삭제된 학생",
           학년: s ? s.grade : "",
           반: s ? s.classNum : "",
           번호: s ? s.number : "",
-          결과: RESULT_LABELS[p.result],
-          점수: pointsFor(settings, m.event, p.result),
+          결과: RESULT_LABELS_WITH_CUSTOM[p.result],
+          점수: pointsForParticipant(settings, m.event, p),
         });
       });
     });
@@ -2161,6 +2303,47 @@ function SettingsTab({
     applyLoadedData(pendingImport);
     setPendingImport(null);
     showToast("백업 파일을 불러왔습니다.", "ok");
+  }
+
+  function exportNameMap() {
+    const map = getNameMap(workspaceCode);
+    const count = Object.keys(map).length;
+    if (count === 0) {
+      showToast("이 기기에 저장된 이름표가 없습니다.", "warn");
+      return;
+    }
+    const blob = new Blob([JSON.stringify(map, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `namemap-${workspaceCode}-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast(`이름표 ${count}건을 내보냈습니다.`, "ok");
+  }
+
+  function handleImportNameMapFile(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const parsed = JSON.parse(evt.target.result);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          showToast("올바른 이름표 파일이 아닙니다.", "warn");
+          return;
+        }
+        mergeNameMap(workspaceCode, parsed);
+        refreshNamesFromLocalMap();
+        showToast(`이름표 ${Object.keys(parsed).length}건을 이 기기에 반영했습니다.`, "ok");
+      } catch (err) {
+        showToast("파일을 읽는 중 오류가 발생했습니다.", "warn");
+      }
+    };
+    reader.readAsText(file);
   }
 
   function handleCloseoutClick() {
@@ -2268,6 +2451,32 @@ function SettingsTab({
             ? "엑셀 파일은 리더보드·명단·경기기록이 각각의 시트로 정리되어 열람·제출·인쇄용으로 좋아요. 이 앱에 나중에 다시 불러오려면(복원) JSON 파일을 이용해 주세요. 불러오기를 하면 지금 화면의 명단·기록이 파일 내용으로 완전히 바뀝니다(되돌릴 수 없어요)."
             : "JSON 백업(내보내기·불러오기)은 개설자만 할 수 있습니다. 여러 명이 각자 따로 불러오면 서로 다른 시점의 기록이 뒤섞일 수 있어서, 혼선을 막기 위해 개설자 한 명으로 창구를 좁혀두었습니다."}
         </p>
+      </div>
+
+      <div className="rounded-lg p-4" style={{ border: "1px solid var(--border-soft)", backgroundColor: "white" }}>
+        <h3 className="lb-title text-lg mb-1" style={{ color: "var(--navy-950)" }}>
+          학생 이름표 (이 기기 전용)
+        </h3>
+        <p className="text-xs mb-3" style={{ color: "var(--ink-500)" }}>
+          학생 이름은 서버(Firebase)에는 저장되지 않고, 이 기기(브라우저)에만 남습니다. 다른 기기에서는 학년-반-번호만 보이니, 아래로 이름표 파일을 내보내 다른 기기에 옮겨보세요.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={exportNameMap}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium"
+            style={{ border: "1px solid var(--border-soft)", color: "var(--navy-950)" }}
+          >
+            <Download size={14} /> 이름표 내보내기
+          </button>
+          <input id="league-namemap-file-input" type="file" accept=".json,application/json" className="hidden" onChange={handleImportNameMapFile} />
+          <label
+            htmlFor="league-namemap-file-input"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium cursor-pointer"
+            style={{ border: "1px solid var(--border-soft)", color: "var(--navy-950)" }}
+          >
+            <Upload size={14} /> 이름표 가져오기
+          </label>
+        </div>
       </div>
 
       {canManageAccess ? (
@@ -2937,8 +3146,8 @@ function WorkspaceGate({ lastCode, onFounderLogin, onCreateCode, onRequestAccess
             <div className="flex flex-col gap-3">
               {[
                 { n: 1, title: "코드 만들기", desc: "원하는 코드(예: 3반체육왕2026)와 비밀번호 두 개(개설자 전용 / 조회용)를 정해 새 코드를 만들어요. 이 코드로 어떤 기기에서든 같은 데이터를 이어서 관리해요." },
-                { n: 2, title: "명단 등록", desc: "'명단 관리' 탭에서 학생을 엑셀로 한 번에 올리거나 직접 추가해요." },
-                { n: 3, title: "경기 기록", desc: "'경기 기록' 탭에서 날짜·종목을 고르고 참가자를 체크해 승/무/패 결과를 입력해요." },
+                { n: 2, title: "명단 등록", desc: "'명단 관리' 탭에서 학생을 엑셀로 한 번에 올리거나 직접 추가해요. 이름은 이 기기에만 저장되니, 다른 기기에서 열 땐 그 기기에서 한 번 더 등록하거나 '이름표 가져오기'로 옮겨오세요." },
+                { n: 3, title: "경기 기록", desc: "'경기 기록' 탭에서 날짜·종목을 고르고 참가자를 체크해 결과를 입력해요. '전체 승/무/패' 버튼으로 한 팀 전체를 한 번에 처리하거나, '직접 입력'으로 특정 학생에게만 점수를 따로 줄 수도 있어요." },
                 { n: 4, title: "리더보드 공유", desc: "'리더보드' 탭이 자동으로 순위를 계산해요. 이 화면만 빔프로젝터나 모바일로 띄워 실시간으로 보여주세요." },
               ].map((s) => (
                 <div key={s.n} className="flex gap-3">
@@ -2961,8 +3170,9 @@ function WorkspaceGate({ lastCode, onFounderLogin, onCreateCode, onRequestAccess
             </div>
           </div>
 
-          <div className="mt-6 pt-4 text-xs" style={{ borderTop: "1px solid var(--border-soft)", color: "var(--ink-500)" }}>
-            동료 선생님과 함께 관리하려면, 코드와 조회 비밀번호를 안내해 "접근 신청"으로 들어오게 하세요. 명단·기록 수정까지 맡기려면 신청 시 "수정 권한도 필요합니다"에 체크하도록 안내하면, 개설자가 승인한 뒤 함께 입력할 수 있어요.
+          <div className="mt-6 pt-4 text-xs flex flex-col gap-1.5" style={{ borderTop: "1px solid var(--border-soft)", color: "var(--ink-500)" }}>
+            <p>동료 선생님과 함께 관리하려면, 코드와 조회 비밀번호를 안내해 "접근 신청"으로 들어오게 하세요. 명단·기록 수정까지 맡기려면 신청 시 "수정 권한도 필요합니다"에 체크하도록 안내하면, 개설자가 승인한 뒤 함께 입력할 수 있어요.</p>
+            <p>학생 이름은 서버가 아닌 각 기기에만 저장돼요. 여러 기기를 쓴다면 설정 탭의 "이름표 내보내기/가져오기"로 이름을 옮길 수 있습니다.</p>
           </div>
         </InfoModal>
       )}
